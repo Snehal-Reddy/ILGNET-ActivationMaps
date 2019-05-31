@@ -1,11 +1,15 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-Created on Thu Apr  4 11:35:02 2019
-
-@author: debopriyo
+Class Activation Mapping
+Googlenet, Kaggle data
 """
 
+from update import *
+from data import *
+from train import *
+import torch, os
+from torch.utils.data import DataLoader
+from torchvision import datasets, transforms
+from inception import inception_v3
 from __future__ import print_function
 import sys
 import torch
@@ -169,14 +173,29 @@ class BasicConv2d(nn.Module):
         x = self.conv(x)
         x = self.bn(x)
         return F.relu(x, inplace=True)
-    
-#%%
+
+
+# functions
+CAM             = 1
+USE_CUDA        = 1
+RESUME          = 0
+PRETRAINED      = 0
+
+
+# hyperparameters
+BATCH_SIZE      = 32
+IMG_SIZE        = 224
+LEARNING_RATE   = 0.01
+EPOCH           = 10
+
+
+# prepare data
 num_classes = 2
-iterations = 100
-lr = 0.0001
-BatchSize = 200
+iterations = 1
+lr = 0.01
+BatchSize = 1
 #%%
-path = "/home/debo/dataset/AVA/"
+path = "/home/ksnehalreddy/Desktop/ILGNET-ActivationMaps/AVA"
 transform = transforms.Compose([transforms.ToTensor()])
                                 
 trainset = AVA_Aesthetics_Ranking_Dataset(root_dir=path,sample_type='train',transform=transform)
@@ -189,7 +208,14 @@ valset = AVA_Aesthetics_Ranking_Dataset(root_dir=path,sample_type='val',transfor
 valset_len = valset.__len__()
 print('Valset Length :', valset_len)
 valsetloader = torch.utils.data.DataLoader(valset,batch_size=BatchSize,shuffle=False,num_workers=8)
-#%%
+
+
+# class
+classes = {0: 'aesthetic', 1: 'not aesthetic'}
+
+
+# network
+# net = inception_v3(pretrained=PRETRAINED)
 net = ILGNet(num_classes=1000,transform_input=False,init_weights=True)
 chkpt = torch.load('/home/debo/ng_sural/data/ILGNet/models/ILGNet_ImageNet_Model_Epoch_2_TrainLoss_61.896224_ValAcc_54.302.pth',map_location='cpu')
 net.load_state_dict(chkpt['state_dict'])
@@ -241,14 +267,26 @@ else:
 optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr = lr)
 ##optimizer = optim.SGD(net.parameters(), lr = lr, momentum=0.9)
 criterion = nn.NLLLoss()
-with open('/home/debo/ng_sural/data/ILGNet/models/ILGNet_AVA2_Model_Training_Validation.csv','w') as f:
-    f.write('Epoch,LearningRate,AvgTrainLoss,AvgTrainAcc,AvgValAcc\n')
-##%%
+
+# # load checkpoint
+# if RESUME != 0:
+#     print("===> Resuming from checkpoint.")
+#     assert os.path.isfile('checkpoint/'+ str(RESUME) + '.pt'), 'Error: no checkpoint found!'
+#     net.load_state_dict(torch.load('checkpoint/' + str(RESUME) + '.pt'))
+
+
+# # retrain
+# criterion = torch.nn.CrossEntropyLoss()
+
+# if PRETRAINED:
+#     optimizer = torch.optim.SGD(net.fc.parameters(), lr=LEARNING_RATE, momentum=0.9, weight_decay=5e-4)
+# else:
+#     optimizer = torch.optim.SGD(net.parameters(), lr=LEARNING_RATE, momentum=0.9, weight_decay=5e-4)
+
 start = time.time()
 valAcc = []
 trainLoss = []
-for epoch in range(iterations):
-    
+for epoch in range (1, EPOCH + 1):
     epochStart = time.time()
     tr_runningLoss = 0.0
     val_runningLoss = 0.0
@@ -290,55 +328,19 @@ for epoch in range(iterations):
     print("Epoch :{:.0f} ; Average Train Accuracy : {:.6f}".format(epoch+1,avgTrainAcc))
     sys.stdout.flush()
     trainLoss.append(avgTrainLoss)
-#    if (epoch+1) % 5 == 0:
-#        lr = lr * 0.1
-#        optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr = lr)
 
 
-    print('Starting Validation...')
-    sys.stdout.flush()
-    with torch.no_grad():
-        net.train(False) # For validation
-        val_running_correct = 0
-       
-        for i, data in enumerate(valsetloader, 0):
-            inputs, labels = data
-#            labels = labels.to(device="cpu", dtype=torch.int64)
-            
-            inputs = inputs.float()
-#            hsv_inputs = hsv_inputs.float()
-            # Wrap them in Vriable
-            if use_gpu:
-                inputs = V(inputs.cuda())
-                outputs = net(inputs)
-                _, predicted = torch.max(outputs.data, 1)
-                predicted = predicted.cpu()
-            else:
-                inputs = V(inputs)
-                outputs = net(inputs)
-                _, predicted = torch.max(outputs.data, 1)
-            val_running_correct += ((predicted == labels).sum()).item()
-            
-#            val_runningLoss += loss.item()
-        avgValAcc = (val_running_correct/(valset.__len__()))*100
-        
-    valAcc.append(avgValAcc)
-    print('Val Accuracy :',avgValAcc)
-    epochEnd = time.time()-epochStart
-    print('Iteration: {:.0f}/{:.0f} ; Training Loss: {:.6f} ; Training Accuracy : {:.6f} ;Validation Accuracy: {:.6f} ; Time Consumed: {:.0f}m {:.0f}s'.
-          format(epoch + 1, iterations, avgTrainLoss, avgTrainAcc, avgValAcc, epochEnd//60, epochEnd%60))
-    
-    sys.stdout.flush()
-    model_path = "/home/debo/ng_sural/data/ILGNet/models/ILGNet_AVA2_Model_Epoch_"+\
-                    str(epoch+1)+"_TrainAcc_"+str(round(avgTrainAcc,6))+"_ValAcc_"+\
-                    str(round(avgValAcc,6))+".pth"
-    with open('/home/debo/ng_sural/data/ILGNet/models/ILGNet_AVA2_Model_Training_Validation.csv','a') as f:
-        f.write(str(epoch+1)+','+str(lr)+','+str(avgTrainLoss)+','+str(avgTrainAcc)+','+str(avgValAcc)+'\n')
-    torch.save({
-            'epoch': epoch+1,
-            'state_dict': net.state_dict()
-            }, model_path)
-    
-end = time.time() - start
-print('Training completed in {:.0f}m {:.0f}s'.format(end//60,end%60))
-sys.stdout.flush()       
+# hook the feature extractor
+features_blobs = []
+
+def hook_feature(module, input, output):
+    features_blobs.append(output.data.cpu().numpy())
+
+net._modules.get(final_conv).register_forward_hook(hook_feature)
+
+
+# CAM
+if CAM:
+    root = 'sample.jpg'
+    img = Image.open(root)
+    get_cam(net, features_blobs, img, classes, root)
